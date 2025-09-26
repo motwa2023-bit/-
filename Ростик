@@ -1,0 +1,74 @@
+# main.py
+import os
+import asyncio
+from dotenv import load_dotenv
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiohttp import web
+
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
+if not TOKEN or not ADMIN_ID:
+    raise SystemExit("Ошибка: переменные окружения TOKEN и ADMIN_ID должны быть установлены")
+
+ADMIN_ID = int(ADMIN_ID)
+
+bot = Bot(token=TOKEN, parse_mode="HTML")
+dp = Dispatcher()
+
+links_kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="Наш сайт 🌐", url="https://example.com")],
+    [InlineKeyboardButton(text="Канал 📢", url="https://t.me/example")],
+])
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer(
+        "Привет! Я принимаю посты и могу скинуть полезные ссылки.\n\n"
+        "Отправь свой пост — я перешлю админу на модерацию.",
+        reply_markup=links_kb
+    )
+
+@dp.message()
+async def handle_message(message: types.Message):
+    text = (message.text or "").lower()
+    if "привет" in text:
+        await message.answer("Привет! Рад тебя видеть 👋")
+        return
+    if "помощь" in text:
+        await message.answer("Опиши, в чём нужна помощь — админ свяжется с тобой 📩")
+        return
+
+    # Пересылаем исходное сообщение админу (работает для текста и медиа)
+    try:
+        await bot.forward_message(chat_id=ADMIN_ID, from_chat_id=message.chat.id, message_id=message.message_id)
+        await message.answer("Спасибо! Пост отправлен на модерацию ✅")
+    except Exception as e:
+        await message.answer("Не удалось переслать сообщение — админ получит уведомление в другом виде.")
+        await bot.send_message(ADMIN_ID, f"Ошибка при пересылке сообщения от {message.from_user.id}:\n{e}\n\nТекст: {message.text}")
+
+# Небольшой веб-сервер, чтобы хостинги, требующие прослушивания порта, были довольны
+async def start_webserver():
+    async def health(request):
+        return web.Response(text="ok")
+    app = web.Application()
+    app.router.add_get("/", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Webserver started on port {port}")
+
+async def main():
+    await start_webserver()
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Бот остановлен")
